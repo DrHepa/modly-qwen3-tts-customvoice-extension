@@ -1,0 +1,150 @@
+{
+  "id": "qwen3-tts-customvoice-process-extension",
+  "name": "Qwen3-TTS CustomVoice",
+  "type": "process",
+  "entry": "qwen3_tts_customvoice_process.py",
+  "version": "0.1.0",
+  "author": "DrHepa",
+  "description": "Generate speech with a built-in Qwen3-TTS CustomVoice speaker as a 24 kHz WAV file.",
+  "source": "https://github.com/DrHepa/modly-qwen3-tts-customvoice-extension",
+  "nodes": [
+    {
+      "id": "generate-speech",
+      "name": "Generate Speech",
+      "input": "text",
+      "output": "audio",
+      "params_schema": [
+        {
+          "id": "speaker",
+          "label": "Speaker",
+          "type": "select",
+          "default": "Vivian",
+          "options": [
+            {"value": "Vivian", "label": "Vivian"},
+            {"value": "Serena", "label": "Serena"},
+            {"value": "Uncle_Fu", "label": "Uncle Fu"},
+            {"value": "Dylan", "label": "Dylan"},
+            {"value": "Eric", "label": "Eric"},
+            {"value": "Ryan", "label": "Ryan"},
+            {"value": "Aiden", "label": "Aiden"},
+            {"value": "Ono_Anna", "label": "Ono Anna"},
+            {"value": "Sohee", "label": "Sohee"}
+          ],
+          "tooltip": "Built-in CustomVoice speaker."
+        },
+        {
+          "id": "language",
+          "label": "Language",
+          "type": "select",
+          "default": "Auto",
+          "options": [
+            {"value": "Auto", "label": "Auto"},
+            {"value": "Chinese", "label": "Chinese"},
+            {"value": "English", "label": "English"},
+            {"value": "German", "label": "German"},
+            {"value": "Italian", "label": "Italian"},
+            {"value": "Portuguese", "label": "Portuguese"},
+            {"value": "Spanish", "label": "Spanish"},
+            {"value": "Japanese", "label": "Japanese"},
+            {"value": "Korean", "label": "Korean"},
+            {"value": "French", "label": "French"},
+            {"value": "Russian", "label": "Russian"}
+          ],
+          "tooltip": "Language passed to Qwen3-TTS; Auto enables automatic detection."
+        },
+        {
+          "id": "instruct",
+          "label": "Voice Instruction",
+          "type": "string",
+          "default": "",
+          "tooltip": "Optional natural-language instruction for speaking style."
+        },
+        {
+          "id": "non_streaming_mode",
+          "label": "Non-streaming Mode",
+          "type": "select",
+          "default": "true",
+          "options": [
+            {"value": "true", "label": "True"},
+            {"value": "false", "label": "False"}
+          ],
+          "tooltip": "Controls upstream text conditioning. PROCESS always returns one final WAV."
+        },
+        {
+          "id": "do_sample",
+          "label": "Do Sample",
+          "type": "select",
+          "default": "true",
+          "options": [
+            {"value": "true", "label": "True"},
+            {"value": "false", "label": "False"}
+          ]
+        },
+        {
+          "id": "top_k",
+          "label": "Top K",
+          "type": "int",
+          "default": 50,
+          "min": 0,
+          "step": 1
+        },
+        {
+          "id": "top_p",
+          "label": "Top P",
+          "type": "float",
+          "default": 1.0
+        },
+        {
+          "id": "temperature",
+          "label": "Temperature",
+          "type": "float",
+          "default": 0.9
+        },
+        {
+          "id": "repetition_penalty",
+          "label": "Repetition Penalty",
+          "type": "float",
+          "default": 1.05
+        },
+        {
+          "id": "subtalker_dosample",
+          "label": "Subtalker Do Sample",
+          "type": "select",
+          "default": "true",
+          "options": [
+            {"value": "true", "label": "True"},
+            {"value": "false", "label": "False"}
+          ]
+        },
+        {
+          "id": "subtalker_top_k",
+          "label": "Subtalker Top K",
+          "type": "int",
+          "default": 50,
+          "min": 0,
+          "step": 1
+        },
+        {
+          "id": "subtalker_top_p",
+          "label": "Subtalker Top P",
+          "type": "float",
+          "default": 1.0
+        },
+        {
+          "id": "subtalker_temperature",
+          "label": "Subtalker Temperature",
+          "type": "float",
+          "default": 0.9
+        },
+        {
+          "id": "max_new_tokens",
+          "label": "Maximum New Tokens",
+          "type": "int",
+          "default": 8192,
+          "min": 2,
+          "step": 1
+        }
+      ]
+    }
+  ]
+}

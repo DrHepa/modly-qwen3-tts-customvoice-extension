@@ -1,0 +1,27 @@
+# Isolated runtime and generated setup state
+venv/
+venv.__modly_staging/
+venv.__modly_backup/
+.modly-local
+
+# Python test and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model/download artifacts must never enter the wrapper repository
+models/
+*.safetensors
+*.part
+
+# Generated workflow artifacts and diagnostics
+*.wav
+*.log
+
+# Editor and operating-system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

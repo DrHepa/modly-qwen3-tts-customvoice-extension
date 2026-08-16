@@ -1,0 +1,15 @@
+Qwen3-TTS CustomVoice Modly Extension
+Copyright 2026 DrHepa
+
+This repository contains the Modly integration written by DrHepa. The wrapper
+is licensed under the MIT License in LICENSE.
+
+The upstream Qwen3-TTS software and the
+Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice model are published by the Qwen team.
+They retain their Apache License 2.0 terms and attribution. A copy of the
+Apache License 2.0 is provided in LICENSES/Apache-2.0.txt. Setup downloads the
+model files from their pinned upstream Hugging Face revision; this repository
+does not redistribute those files.
+
+Modly is the host application by Lightning Pixel and is not part of this
+wrapper repository.
