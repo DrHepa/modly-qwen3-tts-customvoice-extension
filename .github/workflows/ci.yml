@@ -38,7 +38,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install pinned test dependencies
-        run: python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=:all: --requirement requirements-dev.txt
+        run: python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=":all:" --requirement requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest -q

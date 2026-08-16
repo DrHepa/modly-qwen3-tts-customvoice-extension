@@ -262,7 +262,7 @@ def test_ci_workflow_is_minimal_source_only_and_matrix_bounded() -> None:
     assert "ubuntu-latest" in workflow and "windows-latest" in workflow
     assert '"3.11"' in workflow and '"3.12"' in workflow
     assert run_steps == [
-        "python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=:all: --requirement requirements-dev.txt",
+        'python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=":all:" --requirement requirements-dev.txt',
         "python -m pytest -q",
         "python -m compileall -q setup.py qwen3_tts_customvoice_process.py qwen3_tts_modly tests",
     ]
