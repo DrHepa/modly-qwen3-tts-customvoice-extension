@@ -9,7 +9,7 @@ from urllib.error import HTTPError
 import pytest
 
 from qwen3_tts_modly import assets
-from qwen3_tts_modly.constants import ASSETS as PINNED_ASSETS, AssetSpec
+from qwen3_tts_modly.constants import ASSETS as PINNED_ASSETS, EXTENSION_VERSION, AssetSpec
 
 
 class FakeResponse:
@@ -117,6 +117,9 @@ def test_incomplete_partial_resumes_with_exact_range_and_promotes_atomically(tmp
     def opener(request: object, *, timeout: float) -> FakeResponse:
         requests.append(request)
         assert request.headers["Range"] == "bytes=4-"
+        assert request.get_header("User-agent") == (
+            f"Modly-Qwen3-TTS-CustomVoice/{EXTENSION_VERSION}"
+        )
         assert "Authorization" not in request.headers
         return FakeResponse(data[4:], status=206, content_range="bytes 4-8/9")
 

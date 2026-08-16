@@ -423,7 +423,7 @@ def _stream_download(
     if existing_size >= spec.size:
         part_path.unlink(missing_ok=True)
         existing_size = 0
-    headers = {"User-Agent": "Modly-Qwen3-TTS-CustomVoice/0.1.0"}
+    headers = {"User-Agent": f"Modly-Qwen3-TTS-CustomVoice/{EXTENSION_VERSION}"}
     if existing_size:
         headers["Range"] = f"bytes={existing_size}-"
         log(f"Resuming {spec.relative_path} at {existing_size} bytes")

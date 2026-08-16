@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 EXTENSION_ID = "qwen3-tts-customvoice-process-extension"
 EXTENSION_NAME = "Qwen3-TTS CustomVoice"
-EXTENSION_VERSION = "0.1.0"
+EXTENSION_VERSION = "0.1.1"
 NODE_ID = "generate-speech"
 ENTRY_FILENAME = "qwen3_tts_customvoice_process.py"
 

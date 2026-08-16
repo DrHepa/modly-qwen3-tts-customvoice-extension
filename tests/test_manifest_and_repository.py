@@ -20,6 +20,7 @@ from qwen3_tts_modly.constants import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_K,
     DEFAULT_TOP_P,
+    EXTENSION_VERSION,
     LANGUAGES,
     RUNTIME_DISTRIBUTIONS,
     SPEAKERS,
@@ -40,7 +41,8 @@ def test_manifest_declares_exact_public_process_identity() -> None:
     assert value["name"] == "Qwen3-TTS CustomVoice"
     assert value["type"] == "process"
     assert value["entry"] == "qwen3_tts_customvoice_process.py"
-    assert value["version"] == "0.1.0"
+    assert EXTENSION_VERSION == "0.1.1"
+    assert value["version"] == EXTENSION_VERSION
     assert value["author"] == "DrHepa"
     assert value["source"] == "https://github.com/DrHepa/modly-qwen3-tts-customvoice-extension"
     assert (ROOT / value["entry"]).is_file()
@@ -287,6 +289,7 @@ def test_ci_workflow_is_minimal_source_only_and_matrix_bounded() -> None:
 def test_readme_is_truthful_about_real_and_pending_validation_scope() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized = " ".join(readme.split())
+    assert f"Version `{EXTENSION_VERSION}`" in readme
     assert "not E2E verified" in normalized
     assert "VoiceDesign" in normalized and "ref_audio" in normalized
     assert "non_streaming_mode=false" in normalized

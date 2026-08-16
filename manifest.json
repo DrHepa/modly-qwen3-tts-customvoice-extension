@@ -3,7 +3,7 @@
   "name": "Qwen3-TTS CustomVoice",
   "type": "process",
   "entry": "qwen3_tts_customvoice_process.py",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "DrHepa",
   "description": "Generate speech with a built-in Qwen3-TTS CustomVoice speaker as a 24 kHz WAV file.",
   "source": "https://github.com/DrHepa/modly-qwen3-tts-customvoice-extension",

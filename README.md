@@ -6,7 +6,7 @@ input to one mono PCM16 WAV file at 24 kHz using the built-in speakers from
 
 ## Status
 
-Version `0.1.0` has static, unit, mocked protocol, and limited real-runtime
+Version `0.1.1` has static, unit, mocked protocol, and limited real-runtime
 validation. In one clean Linux runtime, setup completed, the immutable
 4,520,218,951-byte model inventory was fully size/hash verified, and one real
 scalar PROCESS request loaded the pinned snapshot strictly offline and produced
