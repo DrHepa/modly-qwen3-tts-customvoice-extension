@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import stat
 import sys
@@ -191,9 +191,9 @@ def test_models_root_alias_is_allowed_but_alias_below_it_is_rejected(tmp_path: P
         owned_model_directory(models_root, create=False)
 
 
-def test_storage_overlap_handles_linux_and_windows_case_semantics(tmp_path: Path) -> None:
-    linux_models = tmp_path / "models"
-    linux_workspace = tmp_path / "workspace"
+def test_storage_overlap_handles_linux_and_windows_case_semantics() -> None:
+    linux_models = PurePosixPath("/opt/modly/models")
+    linux_workspace = PurePosixPath("/opt/modly/workspace")
     assert storage_paths_overlap(linux_models, linux_models / "owned", "linux")
     assert storage_paths_overlap(linux_models, linux_models, "linux")
     assert not storage_paths_overlap(linux_models, linux_workspace, "linux")
@@ -231,7 +231,7 @@ def test_storage_overlap_resolves_existing_alias_parent_without_mutation(
     assert storage_paths_overlap(
         alias / "prospective" / "models",
         physical / "prospective",
-        "linux",
+        normalize_platform_name(sys.platform),
     )
     assert sentinel.read_text(encoding="utf-8") == "untouched"
     assert not (physical / "prospective").exists()

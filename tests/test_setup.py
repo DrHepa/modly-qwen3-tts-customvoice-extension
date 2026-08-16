@@ -17,6 +17,9 @@ from qwen3_tts_modly.paths import PathContractError
 from qwen3_tts_modly.state import StateError
 
 
+NATIVE_SYSTEM = setup_support.normalize_platform_name(sys.platform)
+
+
 def test_parse_setup_args_accepts_current_json_and_parses_actual_legacy_slots() -> None:
     payload = {
         "python_exe": "/runtime/python",
@@ -1198,7 +1201,7 @@ def test_setup_aborts_before_venv_repair_when_state_parent_is_aliased(
     except OSError as exc:
         pytest.skip(f"directory aliases unavailable: {exc}")
     binding = SimpleNamespace(extension_dir=extension, bootstrap_python=tmp_path / "python")
-    flavor = setup_support.PlatformFlavor("linux", "x64", "cpu", "cpu", None)
+    flavor = setup_support.PlatformFlavor(NATIVE_SYSTEM, "x64", "cpu", "cpu", None)
     monkeypatch.setattr(setup, "bind_extension", lambda *_args: binding)
     monkeypatch.setattr(setup, "select_platform_flavor", lambda _context: flavor)
     monkeypatch.setattr(setup, "validate_running_platform", lambda _flavor: None)
@@ -1233,7 +1236,7 @@ def test_setup_rejects_models_root_at_or_inside_venv_before_any_mutation(
     sentinel.write_text("untouched", encoding="utf-8")
     models = venv / "nested" / "models" if nested else venv
     binding = SimpleNamespace(extension_dir=extension, bootstrap_python=tmp_path / "python")
-    flavor = setup_support.PlatformFlavor("linux", "x64", "cpu", "cpu", None)
+    flavor = setup_support.PlatformFlavor(NATIVE_SYSTEM, "x64", "cpu", "cpu", None)
     monkeypatch.setattr(setup, "bind_extension", lambda *_args: binding)
     monkeypatch.setattr(setup, "select_platform_flavor", lambda _context: flavor)
     monkeypatch.setattr(setup, "validate_running_platform", lambda _flavor: None)
@@ -1269,7 +1272,7 @@ def test_setup_storage_disjoint_accepts_linux_windows_and_extension_root_alias(
     except OSError as exc:
         pytest.skip(f"extension aliases unavailable: {exc}")
 
-    assert setup.validate_setup_storage_disjoint(models, extension_alias, "linux") == (
+    assert setup.validate_setup_storage_disjoint(models, extension_alias, NATIVE_SYSTEM) == (
         models / setup.EXTENSION_ID / setup.NODE_ID
     )
     assert setup.validate_setup_storage_disjoint(
@@ -1294,7 +1297,7 @@ def test_setup_storage_overlap_follows_models_root_alias_before_mutation(
         pytest.skip(f"directory aliases unavailable: {exc}")
 
     with pytest.raises(PathContractError, match="SETUP_STORAGE_OVERLAP"):
-        setup.validate_setup_storage_disjoint(models_alias, extension, "linux")
+        setup.validate_setup_storage_disjoint(models_alias, extension, NATIVE_SYSTEM)
 
     assert sentinel.read_text(encoding="utf-8") == "untouched"
 
@@ -1308,15 +1311,15 @@ def test_setup_uses_explicit_models_dir_and_writes_state_last(
     models = tmp_path / "models"
     model_dir = models / "owner" / "node"
     binding = SimpleNamespace(extension_dir=extension, bootstrap_python=tmp_path / "bootstrap")
-    flavor = setup_support.PlatformFlavor("linux", "x64", "cpu", "cpu", None)
-    runtime_python = extension / "venv" / "bin" / "python"
+    flavor = setup_support.PlatformFlavor(NATIVE_SYSTEM, "x64", "cpu", "cpu", None)
+    runtime_python = setup_support.venv_python(extension / "venv", NATIVE_SYSTEM)
     monkeypatch.setattr(setup, "bind_extension", lambda *_args: calls.append("bind") or binding)
     monkeypatch.setattr(setup, "select_platform_flavor", lambda _context: calls.append("flavor") or flavor)
     monkeypatch.setattr(setup, "validate_running_platform", lambda _flavor: calls.append("running"))
 
     def explicit(context: dict, key: str, system: str, *, create: bool) -> Path:
         assert context["models_dir"] == str(models)
-        assert (key, system, create) == ("models_dir", "linux", True)
+        assert (key, system, create) == ("models_dir", NATIVE_SYSTEM, True)
         calls.append("models")
         return models
 
