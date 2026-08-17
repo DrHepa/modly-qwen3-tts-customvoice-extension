@@ -39,6 +39,10 @@ VENV_STAGING_NAME = "venv.__modly_staging"
 VENV_BACKUP_NAME = "venv.__modly_backup"
 COMMAND_OUTPUT_LIMIT = 64 * 1024
 COMMAND_TIMEOUT_SECONDS = 60 * 60
+UTILITY_TIMEOUT_SECONDS = 60
+# Multi-gigabyte wheel installs need a wider wall budget than utility probes,
+# while still requiring a finite Repair boundary.
+DEPENDENCY_INSTALL_TIMEOUT_SECONDS = 3 * COMMAND_TIMEOUT_SECONDS
 COMMAND_READ_SIZE = 8192
 SAFE_COMMAND_STAGES = frozenset(
     {
@@ -379,6 +383,12 @@ def _classify_command_failure(output: bytes) -> tuple[str, str]:
 
 def _command_failure(stage: object, outcome: CommandOutcome) -> SetupSupportError:
     safe_stage = _safe_stage(stage)
+    if outcome.timed_out:
+        return SetupSupportError(
+            "SETUP_COMMAND_TIMEOUT",
+            f"{safe_stage} exceeded its bounded setup time; verify network and "
+            "system responsiveness, then run Repair",
+        )
     code, action = _classify_command_failure(outcome.output)
     return SetupSupportError(
         code,
@@ -386,13 +396,19 @@ def _command_failure(stage: object, outcome: CommandOutcome) -> SetupSupportErro
     )
 
 
-def run_checked(command: list[str], stage: str, log: LogFunction) -> None:
+def run_checked(
+    command: list[str],
+    stage: str,
+    log: LogFunction,
+    *,
+    timeout: int = COMMAND_TIMEOUT_SECONDS,
+) -> None:
     """Run with bounded private output and emit only classified public diagnostics."""
 
     safe_stage = _safe_stage(stage)
     log(safe_stage)
     try:
-        outcome = _bounded_command(command)
+        outcome = _bounded_command(command, timeout=timeout)
     except OSError as exc:
         raise SetupSupportError(
             "SETUP_COMMAND_START_FAILED", f"{safe_stage} could not start; run Repair again"
@@ -881,9 +897,10 @@ def installed_versions(python: Path, names: tuple[str, ...]) -> dict[str, str]:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            timeout=UTILITY_TIMEOUT_SECONDS,
         )
         parsed = json.loads(completed.stdout)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         raise SetupSupportError(
             "SETUP_VERSION_INSPECTION_FAILED", "installed versions could not be inspected"
         ) from exc
@@ -1071,7 +1088,12 @@ def install_dependencies(
         log("Selected direct dependency pins are healthy; skipped installation")
         return
     for stage, command in dependency_commands(python, root, flavor):
-        run_checked(command, stage, log)
+        run_checked(
+            command,
+            stage,
+            log,
+            timeout=DEPENDENCY_INSTALL_TIMEOUT_SECONDS,
+        )
     verify_pip_check(python, flavor, log)
 
 

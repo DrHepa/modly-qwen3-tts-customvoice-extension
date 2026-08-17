@@ -41,7 +41,7 @@ def test_manifest_declares_exact_public_process_identity() -> None:
     assert value["name"] == "Qwen3-TTS CustomVoice"
     assert value["type"] == "process"
     assert value["entry"] == "qwen3_tts_customvoice_process.py"
-    assert EXTENSION_VERSION == "0.1.1"
+    assert EXTENSION_VERSION == "0.1.2"
     assert value["version"] == EXTENSION_VERSION
     assert value["author"] == "DrHepa"
     assert value["source"] == "https://github.com/DrHepa/modly-qwen3-tts-customvoice-extension"
@@ -299,5 +299,7 @@ def test_readme_is_truthful_about_real_and_pending_validation_scope() -> None:
     assert "structurally valid mono PCM16 WAV at 24 kHz" in normalized
     assert "perceptual or transcription-quality evaluation" in normalized
     assert "Clean Install-from-GitHub UI validation" in normalized
-    assert "no successful remote workflow run is claimed yet" in normalized
+    assert "source-only GitHub Actions matrix has completed successfully" in normalized
     assert "not packaged cross-platform E2E evidence" in normalized
+    assert "separate three-hour wall limit" in normalized
+    assert "SETUP_COMMAND_TIMEOUT" in normalized

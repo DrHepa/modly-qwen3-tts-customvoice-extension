@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from qwen3_tts_modly.constants import EXTENSION_ID
+from qwen3_tts_modly.constants import EXTENSION_ID, EXTENSION_VERSION
 from qwen3_tts_modly.paths import (
     PathContractError,
     bind_extension,
@@ -276,6 +276,7 @@ def test_setup_state_is_atomic_pathless_and_rederives_explicit_models_dir(
     assert str(tmp_path) not in serialized
     assert "binding" not in parsed
     assert set(parsed) == {"schema", "extension", "platform", "model"}
+    assert parsed["extension"]["version"] == EXTENSION_VERSION
     monkeypatch.setattr(state, "verify_snapshot", lambda *_args, **_kwargs: [])
     validated = state.validate_runtime_state(extension, models)
     assert validated.model_dir == model_dir.resolve()

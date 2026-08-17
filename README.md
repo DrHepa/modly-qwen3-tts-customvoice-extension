@@ -6,18 +6,24 @@ input to one mono PCM16 WAV file at 24 kHz using the built-in speakers from
 
 ## Status
 
-Version `0.1.1` has static, unit, mocked protocol, and limited real-runtime
+Version `0.1.2` has static, unit, mocked protocol, and limited real-runtime
 validation. In one clean Linux runtime, setup completed, the immutable
 4,520,218,951-byte model inventory was fully size/hash verified, and one real
 scalar PROCESS request loaded the pinned snapshot strictly offline and produced
 a structurally valid mono PCM16 WAV at 24 kHz.
 
+Production Install-from-GitHub evidence also showed that a multi-gigabyte
+PyTorch installation can remain active beyond the former shared one-hour wall
+limit. Version `0.1.2` gives each dependency-install command the separate
+three-hour bound documented below without changing dependency or model pins.
+
 That evidence applies only to the tested Linux runtime configuration. It is not
 a perceptual or transcription-quality evaluation, and it does not establish
 Windows, Linux x64, Linux ARM64, CPU, CUDA 12.8, or CUDA 13.0 support as a whole.
 Clean Install-from-GitHub UI validation and packaged Windows/Linux E2E remain
-pending. A source-only GitHub Actions matrix is included, but no successful
-remote workflow run is claimed yet.
+pending. The source-only GitHub Actions matrix has completed successfully on
+Ubuntu and Windows with Python 3.11 and 3.12; that is not packaged native or
+runtime E2E evidence.
 
 ## Requirements and compatibility
 
@@ -241,6 +247,12 @@ metadata, `SETUP_WHEEL_UNAVAILABLE` indicates a missing binary wheel,
 the privacy-safe fallback. Correct the reported condition and run **Repair**;
 the extension intentionally omits commands, indexes, URLs, local paths,
 credentials, and raw resolver output from public logs.
+
+Each multi-gigabyte dependency-install command has a separate three-hour wall
+limit; environment preparation, dependency checks, metadata audits, and runtime
+health probes retain their shorter bounded limits. `SETUP_COMMAND_TIMEOUT`
+means one of those bounds expired. Verify network and system responsiveness,
+then run **Repair**; setup does not continue from an unverified environment.
 
 Runtime health failures also use a bounded, descriptor-isolated JSON channel.
 `SETUP_HEALTH_CUDA_OOM` means a CUDA allocation failed under current GPU-memory

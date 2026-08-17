@@ -551,6 +551,49 @@ def test_dependency_commands_enforce_order_indices_and_pins(tmp_path: Path, vari
     assert f"torch=={record['torch']}" in qwen_command
 
 
+def test_installed_version_probe_is_short_bounded_and_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command[:2] == ["venv-python", "-c"]
+        assert kwargs == {
+            "check": True,
+            "stdin": subprocess.DEVNULL,
+            "capture_output": True,
+            "text": True,
+            "timeout": setup_support.UTILITY_TIMEOUT_SECONDS,
+        }
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({"torch": "2.11.0", "torchaudio": "2.11.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_support.subprocess, "run", fake_run)
+    assert setup_support.installed_versions(
+        Path("venv-python"), ("torch", "torchaudio")
+    ) == {"torch": "2.11.0", "torchaudio": "2.11.0"}
+
+
+def test_installed_version_probe_timeout_has_stable_private_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_command = ["private-python", "-c", "private-script"]
+
+    def timeout(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(private_command, kwargs["timeout"])
+
+    monkeypatch.setattr(setup_support.subprocess, "run", timeout)
+    with pytest.raises(setup_support.SetupSupportError) as failure:
+        setup_support.installed_versions(Path("private-python"), ("torch",))
+
+    assert failure.value.code == "SETUP_VERSION_INSPECTION_FAILED"
+    exposed = failure.value.public_message + str(failure.value)
+    assert "private-python" not in exposed
+    assert "private-script" not in exposed
+
+
 @pytest.mark.parametrize(
     ("fragment", "expected_code"),
     [
@@ -576,7 +619,7 @@ def test_run_checked_classifies_bounded_output_without_leaking_it(
     monkeypatch.setattr(
         setup_support,
         "_bounded_command",
-        lambda _command: setup_support.CommandOutcome(
+        lambda _command, **_limits: setup_support.CommandOutcome(
             returncode=19,
             output=fragment + secrets,
             truncated=True,
@@ -614,7 +657,9 @@ def test_run_checked_replaces_untrusted_stage_and_handles_invalid_utf8(
     monkeypatch.setattr(
         setup_support,
         "_bounded_command",
-        lambda _command: setup_support.CommandOutcome(7, b"\xff\xfe\x00private"),
+        lambda _command, **_limits: setup_support.CommandOutcome(
+            7, b"\xff\xfe\x00private"
+        ),
     )
     messages: list[str] = []
     with pytest.raises(setup_support.SetupSupportError) as failure:
@@ -626,6 +671,83 @@ def test_run_checked_replaces_untrusted_stage_and_handles_invalid_utf8(
     assert stage_secret not in exposed
     assert "private" not in exposed
     assert "secret-command" not in exposed
+
+
+def test_run_checked_timeout_uses_stable_actionable_private_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_output = b"ReadTimeout https://user:secret@example.invalid/private/path"
+
+    def fake_bounded(command: list[str], **limits: object) -> setup_support.CommandOutcome:
+        assert command == ["private-python", "private-command"]
+        assert limits == {"timeout": setup_support.COMMAND_TIMEOUT_SECONDS}
+        return setup_support.CommandOutcome(
+            returncode=-9,
+            output=private_output,
+            timed_out=True,
+        )
+
+    monkeypatch.setattr(setup_support, "_bounded_command", fake_bounded)
+    messages: list[str] = []
+    with pytest.raises(setup_support.SetupSupportError) as failure:
+        setup_support.run_checked(
+            ["private-python", "private-command"],
+            "Preparing isolated Python environment",
+            messages.append,
+        )
+
+    assert failure.value.code == "SETUP_COMMAND_TIMEOUT"
+    assert messages == ["Preparing isolated Python environment"]
+    exposed = failure.value.public_message + str(failure.value)
+    assert "exceeded its bounded setup time" in exposed
+    assert "run Repair" in exposed
+    for forbidden in (
+        "ReadTimeout",
+        "https://",
+        "secret",
+        "private/path",
+        "private-python",
+        "private-command",
+    ):
+        assert forbidden not in exposed
+
+
+def test_dependency_installs_use_distinct_long_wall_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "constraints.txt").write_text("pins", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("pins", encoding="utf-8")
+    flavor = setup_support.PlatformFlavor("linux", "x64", "cuda", "cu130", "13.0")
+    calls: list[tuple[str, int]] = []
+
+    monkeypatch.setattr(setup_support, "installed_versions", lambda *_args: {})
+    monkeypatch.setattr(
+        setup_support,
+        "run_checked",
+        lambda _command, stage, _log, *, timeout: calls.append((stage, timeout)),
+    )
+    monkeypatch.setattr(setup_support, "verify_pip_check", lambda *_args: None)
+
+    setup_support.install_dependencies(
+        Path("venv-python"), tmp_path, flavor, lambda _message: None
+    )
+
+    assert [stage for stage, _timeout in calls] == [
+        "Pinning Python build tools",
+        "Installing pinned PyTorch cu130 runtime",
+        "Installing pinned native wheels",
+        "Installing the pinned Python SoX wrapper",
+        "Installing the pinned Qwen3-TTS runtime",
+    ]
+    assert {timeout for _stage, timeout in calls} == {
+        setup_support.DEPENDENCY_INSTALL_TIMEOUT_SECONDS
+    }
+    assert (
+        setup_support.DEPENDENCY_INSTALL_TIMEOUT_SECONDS
+        == 3 * setup_support.COMMAND_TIMEOUT_SECONDS
+        == 3 * 60 * 60
+    )
 
 
 def test_bounded_command_kills_output_over_limit() -> None:
@@ -1155,6 +1277,13 @@ def test_venv_verification_accepts_python_311_and_312(
 
     def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command[1:] == ["-m", "pip", "--version"]
+        assert kwargs == {
+            "check": True,
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "timeout": setup_support.UTILITY_TIMEOUT_SECONDS,
+        }
         return subprocess.CompletedProcess(command, 0, stdout="pip fixture", stderr="")
 
     monkeypatch.setattr(setup.subprocess, "run", fake_run)

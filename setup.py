@@ -26,6 +26,7 @@ from qwen3_tts_modly.paths import (
 )
 from qwen3_tts_modly.setup_support import (
     SUPPORTED_PYTHON_MINORS,
+    UTILITY_TIMEOUT_SECONDS,
     VENV_BACKUP_NAME,
     VENV_STAGING_NAME,
     create_or_reuse_venv,
@@ -100,13 +101,14 @@ def verify_python_runtime(python: Path, extension_dir: Path) -> tuple[int, int]:
             [str(python), "-m", "pip", "--version"],
             check=True,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=UTILITY_TIMEOUT_SECONDS,
         )
         version = tuple(int(part) for part in identity.python_minor.split(".", 1))
     except SetupFailure:
         raise
-    except (OSError, subprocess.CalledProcessError, TypeError, ValueError) as exc:
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError) as exc:
         raise SetupFailure(
             "SETUP_VENV_INVALID", "runtime Python could not be verified; run Repair again"
         ) from exc

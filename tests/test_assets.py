@@ -9,7 +9,11 @@ from urllib.error import HTTPError
 import pytest
 
 from qwen3_tts_modly import assets
-from qwen3_tts_modly.constants import ASSETS as PINNED_ASSETS, EXTENSION_VERSION, AssetSpec
+from qwen3_tts_modly.constants import (
+    ASSETS as PINNED_ASSETS,
+    EXTENSION_VERSION,
+    AssetSpec,
+)
 
 
 class FakeResponse:
@@ -204,6 +208,9 @@ def test_snapshot_writes_ready_only_after_exact_json_and_hash_validation(
     assert result == tmp_path.resolve()
     marker = tmp_path / assets.READY_MARKER_FILENAME
     assert marker.is_file()
+    assert json.loads(marker.read_text(encoding="utf-8"))["extensionVersion"] == (
+        EXTENSION_VERSION
+    )
     assert assets.verify_snapshot(tmp_path) == []
     assert opened == 1
 
