@@ -18,11 +18,12 @@ if str(ROOT) not in sys.path:
 from qwen3_tts_modly.assets import ensure_snapshot
 from qwen3_tts_modly.constants import EXTENSION_ID, NODE_ID, STATE_FILENAME
 from qwen3_tts_modly.paths import (
+    SETUP_MODELS_PAYLOAD_KEYS,
     bind_extension,
-    explicit_models_candidate,
-    explicit_models_root,
+    native_directory_path,
     owned_model_directory,
     require_storage_disjoint,
+    resolve_models_root,
 )
 from qwen3_tts_modly.setup_support import (
     SUPPORTED_PYTHON_MINORS,
@@ -129,6 +130,7 @@ def validate_setup_storage_disjoint(
     owned_model_root = models_root / EXTENSION_ID / NODE_ID
     venv = extension_dir / "venv"
     mutable_extension_paths = (
+        extension_dir,
         venv,
         extension_dir / VENV_STAGING_NAME,
         extension_dir / VENV_BACKUP_NAME,
@@ -150,28 +152,27 @@ def validate_setup_storage_disjoint(
 
 def run_setup(context: dict[str, Any]) -> Path:
     log("Starting Install/Repair")
-    if context.get("_legacy_setup") or "models_dir" not in context:
-        raise SetupFailure(
-            "SETUP_MODELS_DIR_REQUIRED",
-            "this extension requires the current Modly JSON setup contract with an absolute models_dir",
-        )
     binding = bind_extension(context, ROOT)
     flavor = select_platform_flavor(context)
     validate_running_platform(flavor)
-    models_candidate = explicit_models_candidate(
+    models_root = resolve_models_root(
         context,
-        "models_dir",
+        binding.extension_dir,
+        ROOT,
         flavor.system,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        require_existing=False,
     )
     validate_setup_storage_disjoint(
-        models_candidate,
+        models_root,
         binding.extension_dir,
         flavor.system,
     )
-    models_root = explicit_models_root(
-        context,
-        "models_dir",
+    models_root = native_directory_path(
+        str(models_root),
+        "resolved models directory",
         flavor.system,
+        must_exist=False,
         create=True,
     )
     model_dir = owned_model_directory(models_root, create=True)

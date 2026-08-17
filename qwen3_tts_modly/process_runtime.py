@@ -60,9 +60,11 @@ from qwen3_tts_modly.diagnostics import (
 )
 from qwen3_tts_modly.paths import (
     PathContractError,
+    RUNTIME_MODELS_PAYLOAD_KEYS,
     current_platform_name,
     native_directory_path,
     require_storage_disjoint,
+    resolve_models_root,
 )
 from qwen3_tts_modly.setup_support import PlatformFlavor
 from qwen3_tts_modly.state import RuntimeState, validate_runtime_state
@@ -102,6 +104,10 @@ ERROR_CATALOG: dict[str, tuple[str, str]] = {
     "REQUEST_PARAM_UNSUPPORTED": ("request validation", "Reset unsupported node parameters."),
     "REQUEST_PARAM_INVALID": ("request validation", "Correct the node parameter values and try again."),
     "REQUEST_PATH_INVALID": ("request validation", "Restart Modly and verify its configured storage paths."),
+    "REQUEST_MODELS_ROOT_UNAVAILABLE": (
+        "model storage resolution",
+        "Use the conventional Modly layout or set MODLY_MODELS_DIR/MODELS_DIR, run Repair, and try again.",
+    ),
     "REQUEST_STORAGE_OVERLAP": (
         "storage validation",
         "Configure separate model, workspace, and temporary storage roots.",
@@ -197,6 +203,7 @@ def validate_runtime_storage_disjoint(
     workflows = workspace_dir / "Workflows"
     output = workspace_dir.joinpath(*OUTPUT_RELATIVE_DIRECTORY)
     mutable_runtime_paths = (
+        code_root,
         workspace_dir,
         workflows,
         output,
@@ -271,6 +278,21 @@ def _absolute_directory(payload: Mapping[str, Any], key: str) -> Path:
             must_exist=True,
         )
     except BaseException as exc:
+        raise ProcessFailure("REQUEST_PATH_INVALID") from exc
+
+
+def _runtime_models_root(payload: Mapping[str, Any]) -> Path:
+    try:
+        return resolve_models_root(
+            payload,
+            ROOT,
+            ROOT,
+            current_platform_name(),
+            payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+        )
+    except PathContractError as exc:
+        if exc.code in {"PATH_MODELS_LAYOUT_UNAVAILABLE", "PATH_DIRECTORY_MISSING"}:
+            raise ProcessFailure("REQUEST_MODELS_ROOT_UNAVAILABLE") from exc
         raise ProcessFailure("REQUEST_PATH_INVALID") from exc
 
 
@@ -370,7 +392,7 @@ def validate_request(payload: Mapping[str, Any]) -> ValidatedRequest:
     params = payload.get("params", {})
     if not isinstance(params, dict):
         raise ProcessFailure("REQUEST_PARAMS_INVALID")
-    models_dir = _absolute_directory(payload, "modelsDir")
+    models_dir = _runtime_models_root(payload)
     workspace_candidate = _absolute_directory(payload, "workspaceDir")
     temp_candidate = _absolute_directory(payload, "tempDir")
     # Preserve the host's lexical paths until both lexical and canonical
@@ -610,12 +632,7 @@ def _workspace_for_diagnostic(payload: Mapping[str, Any] | None) -> Path | None:
             current_platform_name(),
             must_exist=True,
         )
-        models = native_directory_path(
-            payload.get("modelsDir"),
-            "modelsDir",
-            current_platform_name(),
-            must_exist=True,
-        )
+        models = _runtime_models_root(payload)
         temporary_candidate = native_directory_path(
             payload.get("tempDir"),
             "tempDir",

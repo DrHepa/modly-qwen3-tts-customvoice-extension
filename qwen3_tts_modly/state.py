@@ -341,7 +341,7 @@ def validate_runtime_state(
     code_root: Path,
     models_root: Path,
 ) -> RuntimeState:
-    """Re-derive the owned snapshot from explicit modelsDir and verify it exactly."""
+    """Re-derive the owned snapshot from the resolved models root and verify it exactly."""
 
     if code_root.name != EXTENSION_ID:
         raise StateError("STATE_EXTENSION_DRIFT", "extension directory identity changed; run Repair")
@@ -369,7 +369,7 @@ def validate_runtime_state(
     try:
         model_dir = owned_model_directory(models_root, create=False)
     except PathContractError as exc:
-        raise StateError("STATE_MODEL_PATH_INVALID", "configured modelsDir is unsafe; run Repair") from exc
+        raise StateError("STATE_MODEL_PATH_INVALID", "resolved model storage is unsafe; run Repair") from exc
     if verify_snapshot(model_dir, require_ready=True):
         raise StateError("STATE_ASSET_INVENTORY_INVALID", "model files are missing or invalid; run Repair")
     return RuntimeState(model_dir=canonical(model_dir), flavor=flavor, payload=state)

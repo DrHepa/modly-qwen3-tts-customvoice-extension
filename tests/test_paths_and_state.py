@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
+import os
 from pathlib import Path, PurePosixPath
 import platform
 import stat
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -13,12 +15,14 @@ import pytest
 from qwen3_tts_modly.constants import EXTENSION_ID, EXTENSION_VERSION
 from qwen3_tts_modly.paths import (
     PathContractError,
+    RUNTIME_MODELS_PAYLOAD_KEYS,
+    SETUP_MODELS_PAYLOAD_KEYS,
     bind_extension,
-    explicit_models_root,
     normalize_configured_directory_path,
     normalize_architecture,
     normalize_platform_name,
     owned_model_directory,
+    resolve_models_root,
     storage_paths_overlap,
 )
 from qwen3_tts_modly.setup_support import PlatformFlavor
@@ -156,18 +160,246 @@ def test_binding_rejects_manifest_process_contract_mismatch(
         )
 
 
-def test_models_root_is_required_explicitly_and_never_inferred(tmp_path: Path) -> None:
-    with pytest.raises(PathContractError, match="PATH_MODELS_REQUIRED"):
-        explicit_models_root({}, "models_dir", sys.platform, create=True)
-    models = tmp_path / "configured models"
-    result = explicit_models_root(
-        {"models_dir": str(models), "unrelated": str(tmp_path / "other")},
-        "models_dir",
+def test_models_root_uses_verified_conventional_physical_install(tmp_path: Path) -> None:
+    extension, _python = installed_layout(tmp_path)
+    models = tmp_path / "models"
+    models.mkdir()
+
+    result = resolve_models_root(
+        {},
+        extension,
+        extension,
         sys.platform,
-        create=True,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        environ={},
     )
+
     assert result == models
     assert result.is_dir()
+
+
+def _directory_alias(alias: Path, target: Path) -> None:
+    if os.name == "nt":
+        completed = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(alias), str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            pytest.skip("directory junctions unavailable")
+        return
+    try:
+        alias.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory aliases unavailable: {exc}")
+
+
+def test_models_root_preserves_lexical_extension_link_or_junction(tmp_path: Path) -> None:
+    physical = tmp_path / "source-checkout"
+    physical.mkdir()
+    (physical / "manifest.json").write_bytes((ROOT / "manifest.json").read_bytes())
+    modly_root = tmp_path / "configured-modly-root"
+    extensions = modly_root / "extensions"
+    models = modly_root / "models"
+    extensions.mkdir(parents=True)
+    models.mkdir()
+    link = extensions / EXTENSION_ID
+    _directory_alias(link, physical)
+
+    resolved = resolve_models_root(
+        {},
+        link,
+        physical,
+        sys.platform,
+        payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+        environ={},
+    )
+
+    assert resolved == models
+    assert resolved != physical.parent / "models"
+
+
+def test_models_root_explicit_then_environment_then_layout_precedence(tmp_path: Path) -> None:
+    extension, _python = installed_layout(tmp_path)
+    conventional = tmp_path / "models"
+    explicit = tmp_path / "explicit-models"
+    environment = tmp_path / "environment-models"
+    for path in (conventional, explicit, environment):
+        path.mkdir()
+
+    assert resolve_models_root(
+        {"models_dir": str(explicit)},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        environ={"MODLY_MODELS_DIR": str(environment)},
+    ) == explicit
+    assert resolve_models_root(
+        {"modelsDir": str(explicit)},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        environ={},
+    ) == explicit
+    assert resolve_models_root(
+        {},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+        environ={"MODELS_DIR": str(environment)},
+    ) == environment
+    assert resolve_models_root(
+        {},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+        environ={},
+    ) == conventional
+
+
+def test_models_root_independent_layout_fails_actionably_without_override(
+    tmp_path: Path,
+) -> None:
+    extension, _python = installed_layout(tmp_path)
+    independent = tmp_path / "independent" / "models"
+    independent.mkdir(parents=True)
+
+    with pytest.raises(PathContractError, match="PATH_MODELS_LAYOUT_UNAVAILABLE") as failure:
+        resolve_models_root(
+            {},
+            extension,
+            extension,
+            sys.platform,
+            payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+            environ={},
+        )
+    assert "MODLY_MODELS_DIR/MODELS_DIR" in failure.value.public_message
+    assert resolve_models_root(
+        {},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        environ={"MODLY_MODELS_DIR": str(independent)},
+    ) == independent
+
+
+@pytest.mark.parametrize(
+    ("value", "code"),
+    [
+        ("", "PATH_ABSOLUTE_REQUIRED"),
+        (None, "PATH_ABSOLUTE_REQUIRED"),
+        ("relative/models", "PATH_ABSOLUTE_REQUIRED"),
+        ("{tmp}/child/../models", "PATH_TRAVERSAL_REJECTED"),
+        ("{tmp}/models\x00escaped", "PATH_NULL_BYTE"),
+    ],
+)
+def test_models_root_rejects_empty_relative_traversal_and_null_values(
+    tmp_path: Path,
+    value: object,
+    code: str,
+) -> None:
+    raw = value.replace("{tmp}", str(tmp_path)) if isinstance(value, str) else value
+    with pytest.raises(PathContractError, match=code):
+        resolve_models_root(
+            {"models_dir": raw},
+            tmp_path,
+            tmp_path,
+            sys.platform,
+            payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+            environ={},
+        )
+
+
+def test_models_root_rejects_conflicting_setup_aliases(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    with pytest.raises(PathContractError, match="PATH_MODELS_CONFLICT"):
+        resolve_models_root(
+            {"models_dir": str(first), "modelsDir": str(second)},
+            tmp_path,
+            tmp_path,
+            sys.platform,
+            payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+            environ={},
+        )
+
+
+@pytest.mark.parametrize(
+    ("environment", "code"),
+    [
+        ({"MODELS_DIR": ""}, "PATH_ABSOLUTE_REQUIRED"),
+        ({"MODLY_MODELS_DIR": "relative/models"}, "PATH_ABSOLUTE_REQUIRED"),
+        ({"MODELS_DIR": "{tmp}/child/../models"}, "PATH_TRAVERSAL_REJECTED"),
+    ],
+)
+def test_models_root_environment_override_is_also_fail_closed(
+    tmp_path: Path,
+    environment: dict[str, str],
+    code: str,
+) -> None:
+    rendered = {
+        key: value.replace("{tmp}", str(tmp_path))
+        for key, value in environment.items()
+    }
+    with pytest.raises(PathContractError, match=code):
+        resolve_models_root(
+            {},
+            tmp_path,
+            tmp_path,
+            sys.platform,
+            payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+            environ=rendered,
+        )
+
+
+def test_models_root_rejects_conflicting_environment_aliases(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    with pytest.raises(PathContractError, match="PATH_MODELS_CONFLICT"):
+        resolve_models_root(
+            {},
+            tmp_path,
+            tmp_path,
+            sys.platform,
+            payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+            environ={
+                "MODLY_MODELS_DIR": str(first),
+                "MODELS_DIR": str(second),
+            },
+        )
+
+
+def test_setup_and_runtime_layout_resolution_are_identical(tmp_path: Path) -> None:
+    extension, _python = installed_layout(tmp_path)
+    models = tmp_path / "models"
+    models.mkdir()
+    setup_root = resolve_models_root(
+        {},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        environ={},
+    )
+    runtime_root = resolve_models_root(
+        {},
+        extension,
+        extension,
+        sys.platform,
+        payload_keys=RUNTIME_MODELS_PAYLOAD_KEYS,
+        environ={},
+    )
+    assert setup_root == runtime_root == models
 
 
 def test_models_root_alias_is_allowed_but_alias_below_it_is_rejected(tmp_path: Path) -> None:
@@ -178,8 +410,13 @@ def test_models_root_alias_is_allowed_but_alias_below_it_is_rejected(tmp_path: P
         alias.symlink_to(physical, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"directory aliases unavailable: {exc}")
-    models_root = explicit_models_root(
-        {"models_dir": str(alias)}, "models_dir", sys.platform, create=False
+    models_root = resolve_models_root(
+        {"models_dir": str(alias)},
+        tmp_path,
+        tmp_path,
+        sys.platform,
+        payload_keys=SETUP_MODELS_PAYLOAD_KEYS,
+        environ={},
     )
     model_dir = owned_model_directory(models_root, create=True)
     assert model_dir.resolve().is_relative_to(physical.resolve())

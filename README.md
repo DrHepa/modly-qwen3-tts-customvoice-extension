@@ -6,16 +6,18 @@ input to one mono PCM16 WAV file at 24 kHz using the built-in speakers from
 
 ## Status
 
-Version `0.1.2` has static, unit, mocked protocol, and limited real-runtime
-validation. In one clean Linux runtime, setup completed, the immutable
+Version `0.1.3` supports the unmodified Modly v0.4.1 Python PROCESS setup and
+runtime contracts, including their payloads without a model-directory field.
+It has static, unit, mocked protocol, and limited real-runtime validation. In
+one clean Linux runtime, setup completed, the immutable
 4,520,218,951-byte model inventory was fully size/hash verified, and one real
 scalar PROCESS request loaded the pinned snapshot strictly offline and produced
 a structurally valid mono PCM16 WAV at 24 kHz.
 
 Production Install-from-GitHub evidence also showed that a multi-gigabyte
 PyTorch installation can remain active beyond the former shared one-hour wall
-limit. Version `0.1.2` gives each dependency-install command the separate
-three-hour bound documented below without changing dependency or model pins.
+limit. Each dependency-install command therefore has the separate three-hour
+bound documented below without changing dependency or model pins.
 
 That evidence applies only to the tested Linux runtime configuration. It is not
 a perceptual or transcription-quality evaluation, and it does not establish
@@ -27,20 +29,37 @@ runtime E2E evidence.
 
 ## Requirements and compatibility
 
-This extension requires a Modly build whose Python PROCESS contract supplies:
+The extension works with vanilla Modly v0.4.1. Both the one-object JSON setup
+form and the positional forms `<python_exe> <ext_dir> <gpu_sm>` and
+`<python_exe> <ext_dir> <gpu_sm> <cuda_version>` are supported.
 
-- absolute `models_dir` in the one-object setup JSON; and
-- absolute `modelsDir` in each runtime request.
+Setup and runtime use the same fail-closed model-root resolver, in this order:
 
-JSON setup is the only successful setup contract. The historical positional
-forms `<python_exe> <ext_dir> <gpu_sm>` and
-`<python_exe> <ext_dir> <gpu_sm> <cuda_version>` have no model-storage field;
-they are parsed only to report the stable `SETUP_MODELS_DIR_REQUIRED` upgrade
-error instead of guessing a directory.
+1. an optional absolute `models_dir` or `modelsDir` setup value, or optional
+   absolute runtime `modelsDir` value, when a compatible host supplies one;
+2. an absolute `MODLY_MODELS_DIR` or `MODELS_DIR` environment override; then
+3. the existing sibling `models` directory beside the lexical `extensions`
+   directory used to launch the extension.
 
-The extension uses only those explicit values. It does not inspect Modly
-settings, user profiles, environment variables, sibling directories, or a
-global Hugging Face cache to discover model storage.
+The final fallback is the standard public Modly layout. Its lexical path is
+preserved so a local extension symlink or Windows junction still selects the
+models directory belonging to the Modly installation that owns that link. The
+manifest ID, PROCESS entry, node identity, parent layout, and existing sibling
+models directory are verified before inference. Empty, relative, traversing,
+conflicting, or null-containing overrides fail instead of falling through.
+
+Vanilla v0.4.1 does not expose an independently configured models root to a
+Python PROCESS. If the Extensions and Models directories were configured under
+different roots, set the same `MODLY_MODELS_DIR` (preferred) or `MODELS_DIR`
+before launching Modly and running Repair. If the sibling models directory is
+absent, resolution fails with an actionable error. If an unused sibling models
+directory also exists, the host cannot distinguish it from the configured
+directory; the environment override is therefore required to avoid preparing
+assets in that unused sibling.
+
+The resolver never reads Modly settings, user profiles, loopback services, or a
+global Hugging Face cache, and it never stores the selected absolute path in
+setup state.
 
 ### Candidate platform matrix
 
@@ -64,16 +83,17 @@ every Python/platform combination.
 
 ## Installation and Repair
 
-When this repository is published and the matching Modly host contract is
-available, use Modly's **Install from GitHub** flow:
+Use Modly's **Install from GitHub** flow:
 
 1. Install `https://github.com/DrHepa/modly-qwen3-tts-customvoice-extension`
    through Modly's extension installer.
    The checkout or install-directory basename is not the extension identity
    and may differ from `qwen3-tts-customvoice-process-extension`. Setup binds
-   `ext_dir` canonically to the running extension root and verifies the regular,
-   non-aliased root `manifest.json`, including its exact ID and PROCESS entry
-   contract, before making changes.
+   the host-supplied lexical `ext_dir` to the running extension root and verifies
+   the regular root `manifest.json`, including its exact ID and PROCESS entry
+   contract, before making changes. A local symlink or junction remains lexical
+   for standard-layout model-root derivation while its target identity is
+   verified canonically.
 2. Setup creates or repairs exactly `<extension>/venv` using Modly's Python.
    A venv is reused in place only when Python minor, implementation, cache tag,
    SOABI, operating system, and architecture match, and the interpreter reports
@@ -120,7 +140,7 @@ run returns one audio artifact backed by the validated WAV described below.
 
 ## Model storage
 
-Setup owns this directory under the explicit Modly models root:
+Setup owns this directory under the resolved Modly models root:
 
 ```text
 <modelsDir>/qwen3-tts-customvoice-process-extension/generate-speech
@@ -135,13 +155,14 @@ Setup state stores public version, platform-flavor, and inventory records only;
 it does not persist configured absolute paths, request data, or credentials.
 
 Storage roots must be canonically disjoint. Before setup creates, removes, or
-repairs anything, it rejects a `models_dir` or owned snapshot that is the same
-as, above, or below the extension's venv, venv recovery directories, state, or
-other extension-managed mutable paths. Runtime applies the same bidirectional
-rule between `modelsDir`/the owned snapshot and `workspaceDir`, `Workflows`,
-`tempDir`, output, diagnostics, and setup-state paths. Existing symlink or
-junction parents and not-yet-created descendants are checked without creating
-them. Ordinary disjoint sibling roots remain supported.
+repairs anything, it rejects the resolved models root or owned snapshot when it
+is the same as, above, or below the extension source tree, venv, venv recovery
+directories, state, or other extension-managed mutable paths. Runtime applies
+the same bidirectional rule between the resolved models root/the owned snapshot
+and the extension source tree, `workspaceDir`, `Workflows`, `tempDir`, output,
+diagnostics, and setup-state paths. Existing symlink or junction parents and
+not-yet-created descendants are checked without creating them. Ordinary
+disjoint sibling roots remain supported; extension-local weights never are.
 
 With the intended separate Modly models root, the snapshot is outside the
 extension source directory. Modly uninstall may therefore leave it in place.
@@ -195,11 +216,11 @@ model's supported language list and are not exposed.
 
 ## Outputs
 
-Runtime requires the explicit `modelsDir`, re-derives the owned snapshot,
-validates pathless setup state and every asset before importing Qwen, and sets
-Hugging Face/Transformers offline flags before those libraries can import. It
-loads only the absolute local snapshot with `local_files_only=True` and never
-falls back to a remote service.
+Runtime resolves the same models root used by setup, re-derives the owned
+snapshot, validates pathless setup state and every asset before importing Qwen,
+and sets Hugging Face/Transformers offline flags before those libraries can
+import. It loads only the absolute local snapshot with
+`local_files_only=True` and never falls back to a remote service.
 
 Successful runs atomically publish a unique file beneath:
 
@@ -232,6 +253,14 @@ tracebacks, environment values, commands, settings, tokens, or secrets.
 Run **Repair** after dependency changes, interrupted setup, or model-file
 modification. Correct `REQUEST_*` values in the node. For `OUTPUT_*`, verify
 workspace storage and permissions.
+
+`PATH_MODELS_LAYOUT_UNAVAILABLE` during setup, or
+`REQUEST_MODELS_ROOT_UNAVAILABLE` during generation, means the standard sibling
+models directory could not be used. For an independently configured Models
+directory, set `MODLY_MODELS_DIR` or `MODELS_DIR` to its absolute path before
+launching Modly, then run Repair. `PATH_MODELS_CONFLICT`,
+`PATH_TRAVERSAL_REJECTED`, `PATH_ABSOLUTE_REQUIRED`, and `PATH_NULL_BYTE`
+indicate an unsafe or ambiguous override; correct or remove the override.
 
 `SETUP_STORAGE_OVERLAP` means the configured models root intersects
 extension-managed mutable storage. `REQUEST_STORAGE_OVERLAP` means model
@@ -271,12 +300,15 @@ external SoX remains a warning after otherwise successful health checks.
 - The successful Linux runtime validation covers one configuration only. Every
   listed platform/flavor combination remains a candidate until it is packaged
   and validated independently end to end.
-- Clean Install-from-GitHub UI validation and remote GitHub Actions evidence
-  remain pending.
+- Clean Install-from-GitHub UI validation and packaged Windows/Linux E2E remain
+  pending.
 - The generated WAV passed structural audio checks; perceptual quality and
   transcription accuracy were not evaluated.
 - Requests are scalar. Batch input and streamed audio artifacts are not part
   of the current PROCESS contract.
+- Vanilla Modly v0.4.1 cannot report an independently configured models root to
+  a Python PROCESS; those installations require the documented environment
+  override for both Repair and generation.
 - VoiceDesign, Base-model cloning, and reference-audio conditioning are outside
   this CustomVoice node.
 - Peak memory and complete installed-environment size have not yet been
@@ -299,8 +331,9 @@ python3 -m compileall -q setup.py qwen3_tts_customvoice_process.py qwen3_tts_mod
 
 The strict Modly extension validator must be run with its audited audio I/O
 allowance. `.github/workflows/ci.yml` defines the same source-only pytest and
-compile checks for Ubuntu and Windows with Python 3.11 and 3.12. The workflow
-has been added for publication but has not yet produced a remote CI result.
+compile checks for Ubuntu and Windows with Python 3.11 and 3.12. Published
+release tags are created only after that matrix is green for the exact source
+commit.
 
 Separately from those static tiers, one clean Linux runtime setup, immutable
 asset verification, offline local model load, scalar PROCESS generation, and

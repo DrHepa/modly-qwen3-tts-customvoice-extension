@@ -11,7 +11,7 @@ import posixpath
 import re
 import stat
 import sys
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from .constants import ENTRY_FILENAME, EXTENSION_ID, NODE_ID
 
@@ -32,6 +32,11 @@ class PathContractError(RuntimeError):
 class ExtensionBinding:
     extension_dir: Path
     bootstrap_python: Path
+
+
+SETUP_MODELS_PAYLOAD_KEYS = ("models_dir", "modelsDir")
+RUNTIME_MODELS_PAYLOAD_KEYS = ("modelsDir",)
+MODELS_ENVIRONMENT_KEYS = ("MODLY_MODELS_DIR", "MODELS_DIR")
 
 
 def normalize_platform_name(value: object) -> str:
@@ -105,11 +110,9 @@ def native_directory_path(
     return path
 
 
-def bind_extension(context: Mapping[str, object], code_root: Path) -> ExtensionBinding:
-    platform_name = normalize_platform_name(context.get("platform") or current_platform_name())
-    extension_dir = native_directory_path(
-        context.get("ext_dir"), "ext_dir", platform_name, must_exist=True
-    )
+def verify_extension_identity(extension_dir: Path, code_root: Path) -> None:
+    """Verify the manifest through a lexical install path without resolving that path away."""
+
     try:
         extension_root = extension_dir.resolve(strict=True)
         bound_code_root = code_root.resolve(strict=True)
@@ -170,6 +173,14 @@ def bind_extension(context: Mapping[str, object], code_root: Path) -> ExtensionB
             "PATH_MANIFEST_CONTRACT_MISMATCH", "the extension manifest contract is invalid"
         )
 
+
+def bind_extension(context: Mapping[str, object], code_root: Path) -> ExtensionBinding:
+    platform_name = normalize_platform_name(context.get("platform") or current_platform_name())
+    extension_dir = native_directory_path(
+        context.get("ext_dir"), "ext_dir", platform_name, must_exist=True
+    )
+    verify_extension_identity(extension_dir, code_root)
+
     python_value = context.get("python_exe")
     if not isinstance(python_value, str) or not python_value.strip():
         raise PathContractError("PATH_PYTHON_REQUIRED", "python_exe is required")
@@ -182,36 +193,122 @@ def bind_extension(context: Mapping[str, object], code_root: Path) -> ExtensionB
     return ExtensionBinding(extension_dir=extension_dir, bootstrap_python=python)
 
 
-def explicit_models_root(
+def _reject_traversal(value: object, label: str, platform_name: str) -> None:
+    if not isinstance(value, str):
+        return
+    separators = r"[\\/]" if platform_name == "win32" else "/"
+    if any(part in {".", ".."} for part in re.split(separators, value)):
+        raise PathContractError(
+            "PATH_TRAVERSAL_REJECTED", f"{label} must not contain traversal segments"
+        )
+
+
+def _configured_models_root(
+    value: object,
+    label: str,
+    platform_name: str,
+    *,
+    require_existing: bool,
+) -> Path:
+    _reject_traversal(value, label, platform_name)
+    return native_directory_path(
+        value,
+        label,
+        platform_name,
+        must_exist=require_existing,
+    )
+
+
+def _models_root_from_keys(
+    values: Mapping[str, object],
+    keys: Sequence[str],
+    platform_name: str,
+    *,
+    require_existing: bool,
+) -> Path | None:
+    present = [key for key in keys if key in values]
+    if not present:
+        return None
+    roots = [
+        _configured_models_root(
+            values[key],
+            key,
+            platform_name,
+            require_existing=require_existing,
+        )
+        for key in present
+    ]
+    first_key = canonical_comparison_key(roots[0], platform_name)
+    if any(canonical_comparison_key(root, platform_name) != first_key for root in roots[1:]):
+        raise PathContractError(
+            "PATH_MODELS_CONFLICT",
+            "multiple model-directory overrides identify different locations",
+        )
+    return roots[0]
+
+
+def resolve_models_root(
     payload: Mapping[str, object],
-    key: str,
+    extension_dir: Path,
+    code_root: Path,
     platform_name: object,
     *,
-    create: bool,
+    payload_keys: Sequence[str],
+    environ: Mapping[str, str] | None = None,
+    require_existing: bool = True,
 ) -> Path:
-    if key not in payload:
-        raise PathContractError(
-            "PATH_MODELS_REQUIRED", f"{key} is required by this PROCESS extension"
-        )
-    return native_directory_path(
-        payload.get(key), key, platform_name, must_exist=not create, create=create
+    """Resolve one existing Modly models root with explicit, env, then layout precedence."""
+
+    platform_value = normalize_platform_name(platform_name)
+    explicit = _models_root_from_keys(
+        payload,
+        payload_keys,
+        platform_value,
+        require_existing=require_existing,
     )
+    if explicit is not None:
+        return explicit
 
-
-def explicit_models_candidate(
-    payload: Mapping[str, object],
-    key: str,
-    platform_name: object,
-) -> Path:
-    """Parse a configured models root without requiring or creating it."""
-
-    if key not in payload:
-        raise PathContractError(
-            "PATH_MODELS_REQUIRED", f"{key} is required by this PROCESS extension"
-        )
-    return native_directory_path(
-        payload.get(key), key, platform_name, must_exist=False, create=False
+    environment: Mapping[str, object] = os.environ if environ is None else environ
+    overridden = _models_root_from_keys(
+        environment,
+        MODELS_ENVIRONMENT_KEYS,
+        platform_value,
+        require_existing=require_existing,
     )
+    if overridden is not None:
+        return overridden
+
+    verify_extension_identity(extension_dir, code_root)
+    extensions_root = extension_dir.parent
+    if extensions_root.name.casefold() != "extensions":
+        raise PathContractError(
+            "PATH_MODELS_LAYOUT_UNAVAILABLE",
+            (
+                "the Modly models directory cannot be derived from this installation; "
+                "install under an extensions directory or set MODLY_MODELS_DIR/MODELS_DIR, "
+                "then run Repair"
+            ),
+        )
+    inferred = extensions_root.parent / "models"
+    try:
+        return native_directory_path(
+            str(inferred),
+            "conventional Modly models directory",
+            platform_value,
+            must_exist=True,
+        )
+    except PathContractError as exc:
+        if exc.code not in {"PATH_DIRECTORY_MISSING", "PATH_ABSOLUTE_REQUIRED"}:
+            raise
+        raise PathContractError(
+            "PATH_MODELS_LAYOUT_UNAVAILABLE",
+            (
+                "the conventional sibling models directory is unavailable; "
+                "set MODLY_MODELS_DIR/MODELS_DIR for an independently configured root, "
+                "then run Repair"
+            ),
+        ) from exc
 
 
 def canonical(path: Path) -> Path:

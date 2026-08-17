@@ -42,8 +42,6 @@ def test_parse_setup_args_accepts_current_json_and_parses_actual_legacy_slots() 
         assert legacy["cuda_version"] == expected_cuda
         assert legacy["accelerator"] == "cuda"
         assert legacy["_legacy_setup"] is True
-        with pytest.raises(setup.SetupFailure, match="SETUP_MODELS_DIR_REQUIRED"):
-            setup.run_setup(legacy)
 
 
 @pytest.mark.parametrize(
@@ -1334,7 +1332,7 @@ def test_setup_aborts_before_venv_repair_when_state_parent_is_aliased(
     monkeypatch.setattr(setup, "bind_extension", lambda *_args: binding)
     monkeypatch.setattr(setup, "select_platform_flavor", lambda _context: flavor)
     monkeypatch.setattr(setup, "validate_running_platform", lambda _flavor: None)
-    monkeypatch.setattr(setup, "explicit_models_root", lambda *_args, **_kwargs: models)
+    monkeypatch.setattr(setup, "resolve_models_root", lambda *_args, **_kwargs: models)
     monkeypatch.setattr(
         setup,
         "owned_model_directory",
@@ -1352,18 +1350,26 @@ def test_setup_aborts_before_venv_repair_when_state_parent_is_aliased(
     assert external_state.read_text(encoding="utf-8") == "external"
 
 
-@pytest.mark.parametrize("nested", [False, True])
-def test_setup_rejects_models_root_at_or_inside_venv_before_any_mutation(
+@pytest.mark.parametrize(
+    "relationship",
+    ["extension", "extension-child", "venv", "venv-child"],
+)
+def test_setup_rejects_models_root_in_extension_or_venv_before_any_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    nested: bool,
+    relationship: str,
 ) -> None:
     extension = tmp_path / "extension"
     venv = extension / "venv"
     venv.mkdir(parents=True)
     sentinel = venv / "sentinel.txt"
     sentinel.write_text("untouched", encoding="utf-8")
-    models = venv / "nested" / "models" if nested else venv
+    models = {
+        "extension": extension,
+        "extension-child": extension / "weights",
+        "venv": venv,
+        "venv-child": venv / "nested" / "models",
+    }[relationship]
     binding = SimpleNamespace(extension_dir=extension, bootstrap_python=tmp_path / "python")
     flavor = setup_support.PlatformFlavor(NATIVE_SYSTEM, "x64", "cpu", "cpu", None)
     monkeypatch.setattr(setup, "bind_extension", lambda *_args: binding)
@@ -1371,7 +1377,12 @@ def test_setup_rejects_models_root_at_or_inside_venv_before_any_mutation(
     monkeypatch.setattr(setup, "validate_running_platform", lambda _flavor: None)
     monkeypatch.setattr(
         setup,
-        "explicit_models_root",
+        "resolve_models_root",
+        lambda *_args, **_kwargs: models,
+    )
+    monkeypatch.setattr(
+        setup,
+        "native_directory_path",
         lambda *_args, **_kwargs: pytest.fail("overlap must fail before models root creation"),
     )
     monkeypatch.setattr(
@@ -1384,7 +1395,7 @@ def test_setup_rejects_models_root_at_or_inside_venv_before_any_mutation(
         setup.run_setup({"models_dir": str(models)})
 
     assert sentinel.read_text(encoding="utf-8") == "untouched"
-    if nested:
+    if relationship in {"extension-child", "venv-child"}:
         assert not models.exists()
 
 
@@ -1431,9 +1442,11 @@ def test_setup_storage_overlap_follows_models_root_alias_before_mutation(
     assert sentinel.read_text(encoding="utf-8") == "untouched"
 
 
-def test_setup_uses_explicit_models_dir_and_writes_state_last(
+@pytest.mark.parametrize("context", [{}, {"_legacy_setup": True}])
+def test_setup_uses_shared_models_resolver_for_vanilla_and_legacy_and_writes_state_last(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    context: dict[str, object],
 ) -> None:
     calls: list[str] = []
     extension = tmp_path / "extension"
@@ -1446,13 +1459,33 @@ def test_setup_uses_explicit_models_dir_and_writes_state_last(
     monkeypatch.setattr(setup, "select_platform_flavor", lambda _context: calls.append("flavor") or flavor)
     monkeypatch.setattr(setup, "validate_running_platform", lambda _flavor: calls.append("running"))
 
-    def explicit(context: dict, key: str, system: str, *, create: bool) -> Path:
-        assert context["models_dir"] == str(models)
-        assert (key, system, create) == ("models_dir", NATIVE_SYSTEM, True)
+    def resolve(
+        supplied: dict,
+        extension_dir: Path,
+        code_root: Path,
+        system: str,
+        **kwargs: object,
+    ) -> Path:
+        assert supplied == context
+        assert extension_dir == extension
+        assert code_root == setup.ROOT
+        assert system == NATIVE_SYSTEM
+        assert kwargs == {
+            "payload_keys": setup.SETUP_MODELS_PAYLOAD_KEYS,
+            "require_existing": False,
+        }
         calls.append("models")
         return models
 
-    monkeypatch.setattr(setup, "explicit_models_root", explicit)
+    monkeypatch.setattr(setup, "resolve_models_root", resolve)
+    monkeypatch.setattr(
+        setup,
+        "native_directory_path",
+        lambda value, label, system, **kwargs: (
+            calls.append("models-create")
+            or models
+        ),
+    )
     monkeypatch.setattr(setup, "owned_model_directory", lambda *_args, **_kwargs: calls.append("owned") or model_dir)
     monkeypatch.setattr(setup, "invalidate_setup_state", lambda _path: calls.append("invalidate"))
     monkeypatch.setattr(setup, "create_or_reuse_venv", lambda *_args: calls.append("venv") or runtime_python)
@@ -1461,12 +1494,13 @@ def test_setup_uses_explicit_models_dir_and_writes_state_last(
     monkeypatch.setattr(setup, "verify_runtime", lambda *_args: calls.append("health") or {"pythonMinor": "3.12", "cudaBf16": False})
     monkeypatch.setattr(setup, "ensure_snapshot", lambda *_args, **_kwargs: calls.append("snapshot") or model_dir)
     monkeypatch.setattr(setup, "write_setup_state", lambda *_args: calls.append("state"))
-    assert setup.run_setup({"models_dir": str(models)}) == model_dir
+    assert setup.run_setup(context) == model_dir
     assert calls == [
         "bind",
         "flavor",
         "running",
         "models",
+        "models-create",
         "owned",
         "invalidate",
         "venv",

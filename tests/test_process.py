@@ -39,6 +39,13 @@ def payload(tmp_path: Path, *, text: object = "Hello from Qwen.", params: object
     }
 
 
+def conventional_extension(tmp_path: Path) -> Path:
+    extension = tmp_path / "extensions" / process.EXTENSION_ID
+    extension.mkdir(parents=True)
+    (extension / "manifest.json").write_bytes((ROOT / "manifest.json").read_bytes())
+    return extension
+
+
 def runtime_state(model_dir: Path, flavor: PlatformFlavor = CPU_FLAVOR) -> RuntimeState:
     return RuntimeState(model_dir=model_dir.resolve(), flavor=flavor, payload={})
 
@@ -53,7 +60,10 @@ def fake_state(model_dir: Path, calls: list[str] | None = None):
     return validate
 
 
-def test_request_defaults_match_manifest_and_require_explicit_models_dir(tmp_path: Path) -> None:
+def test_request_defaults_match_manifest_and_vanilla_payload_derives_models_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = process.validate_request(payload(tmp_path))
     assert request.params == process.RequestParameters(
         speaker="Vivian",
@@ -71,10 +81,14 @@ def test_request_defaults_match_manifest_and_require_explicit_models_dir(tmp_pat
         subtalker_temperature=0.9,
         max_new_tokens=8192,
     )
-    missing = payload(tmp_path)
-    missing.pop("modelsDir")
-    with pytest.raises(process.ProcessFailure, match="REQUEST_PATH_INVALID"):
-        process.validate_request(missing)
+    vanilla = payload(tmp_path)
+    vanilla.pop("modelsDir")
+    extension = conventional_extension(tmp_path)
+    monkeypatch.setattr(process, "ROOT", extension)
+    monkeypatch.delenv("MODLY_MODELS_DIR", raising=False)
+    monkeypatch.delenv("MODELS_DIR", raising=False)
+    derived = process.validate_request(vanilla)
+    assert derived.models_dir == tmp_path / "models"
 
 
 @pytest.mark.parametrize(
@@ -134,6 +148,34 @@ def test_runtime_storage_overlap_fails_before_state_or_output_mutation(
     assert "Diagnostic:" not in messages[-1]["message"]
     assert sentinel.read_text(encoding="utf-8") == "untouched"
     assert not (workspace / "Workflows").exists()
+
+
+@pytest.mark.parametrize("relationship", ["models-inside-code", "code-inside-models"])
+def test_runtime_rejects_extension_local_or_ancestor_model_storage(
+    tmp_path: Path,
+    relationship: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    temporary = tmp_path / "temp"
+    workspace.mkdir()
+    temporary.mkdir()
+    if relationship == "models-inside-code":
+        code_root = tmp_path / "extension"
+        models = code_root / "weights"
+    else:
+        models = tmp_path / "models"
+        code_root = models / "source-checkout"
+    code_root.mkdir(parents=True)
+    models.mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(process.ProcessFailure) as failure:
+        process.validate_runtime_storage_disjoint(
+            models,
+            workspace,
+            temporary,
+            code_root=code_root,
+        )
+    assert failure.value.code == "REQUEST_STORAGE_OVERLAP"
 
 
 def test_runtime_storage_overlap_resolves_models_alias_without_diagnostics(
@@ -365,9 +407,10 @@ def test_load_runtime_uses_only_local_snapshot_sdpa_and_cpu_float32(
     ]
 
 
-def test_valid_protocol_captures_third_party_output_and_writes_pcm16_wav(
+def test_vanilla_protocol_without_models_dir_captures_output_and_writes_pcm16_wav(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -393,9 +436,15 @@ def test_valid_protocol_captures_third_party_output_and_writes_pcm16_wav(
             runtime_loader=loader,
         )
 
+    extension = conventional_extension(tmp_path)
+    monkeypatch.setattr(process, "ROOT", extension)
+    monkeypatch.delenv("MODLY_MODELS_DIR", raising=False)
+    monkeypatch.delenv("MODELS_DIR", raising=False)
+    vanilla = payload(tmp_path)
+    vanilla.pop("modelsDir")
     output = io.StringIO()
     code = process.run_protocol(
-        io.StringIO(json.dumps(payload(tmp_path)) + "\n"), output, handler
+        io.StringIO(json.dumps(vanilla) + "\n"), output, handler
     )
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
     assert code == 0

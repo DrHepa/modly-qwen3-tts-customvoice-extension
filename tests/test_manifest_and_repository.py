@@ -41,7 +41,7 @@ def test_manifest_declares_exact_public_process_identity() -> None:
     assert value["name"] == "Qwen3-TTS CustomVoice"
     assert value["type"] == "process"
     assert value["entry"] == "qwen3_tts_customvoice_process.py"
-    assert EXTENSION_VERSION == "0.1.2"
+    assert EXTENSION_VERSION == "0.1.3"
     assert value["version"] == EXTENSION_VERSION
     assert value["author"] == "DrHepa"
     assert value["source"] == "https://github.com/DrHepa/modly-qwen3-tts-customvoice-extension"
@@ -218,7 +218,7 @@ def test_local_metadata_sentinel_is_ignored_absent_and_still_scannable(
     assert _private_reference_hits(ROOT) == []
 
 
-def test_runtime_has_no_hidden_network_cache_or_models_root_discovery() -> None:
+def test_runtime_has_no_hidden_network_cache_or_private_models_root_discovery() -> None:
     bootstrap = (ROOT / manifest()["entry"]).read_text(encoding="utf-8")
     runtime = (ROOT / "qwen3_tts_modly" / "process_runtime.py").read_text(encoding="utf-8")
     lowered = runtime.casefold()
@@ -229,14 +229,20 @@ def test_runtime_has_no_hidden_network_cache_or_models_root_discovery() -> None:
         "hf_hub" + "_download",
         "expand" + "user",
         "settings" + ".json",
-        'environ.get("' + "mode" + 'ls_dir")',
-        'environ.get("' + "modly" + '_models_dir")',
+        "user" + "profile",
+        "local" + "host",
+        "127." + "0.0.1",
     ):
         assert forbidden not in lowered
     assert "local_files_only=True" in runtime
     assert 'os.environ["HF_HUB_OFFLINE"] = "1"' in runtime
     assert 'os.environ["TRANSFORMERS_OFFLINE"] = "1"' in runtime
-    assert '_absolute_directory(payload, "modelsDir")' in runtime
+    assert "resolve_models_root(" in runtime
+    paths = (ROOT / "qwen3_tts_modly" / "paths.py").read_text(encoding="utf-8")
+    assert 'SETUP_MODELS_PAYLOAD_KEYS = ("models_dir", "modelsDir")' in paths
+    assert 'RUNTIME_MODELS_PAYLOAD_KEYS = ("modelsDir",)' in paths
+    assert 'MODELS_ENVIRONMENT_KEYS = ("MODLY_MODELS_DIR", "MODELS_DIR")' in paths
+    assert 'extensions_root.name.casefold() != "extensions"' in paths
     assert "from qwen3_tts_modly.process_runtime import run_protocol" in bootstrap
     assert bootstrap.index("os.dup2(null_fd, 2)") < bootstrap.index(
         "from qwen3_tts_modly.process_runtime import run_protocol"
