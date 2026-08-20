@@ -6,7 +6,7 @@ input to one mono PCM16 WAV file at 24 kHz using the built-in speakers from
 
 ## Status
 
-Version `0.1.3` supports the unmodified Modly v0.4.1 Python PROCESS setup and
+Version `0.1.4` supports the unmodified Modly v0.4.1 Python PROCESS setup and
 runtime contracts, including their payloads without a model-directory field.
 It has static, unit, mocked protocol, and limited real-runtime validation. In
 one clean Linux runtime, setup completed, the immutable
@@ -14,10 +14,11 @@ one clean Linux runtime, setup completed, the immutable
 scalar PROCESS request loaded the pinned snapshot strictly offline and produced
 a structurally valid mono PCM16 WAV at 24 kHz.
 
-Production Install-from-GitHub evidence also showed that a multi-gigabyte
-PyTorch installation can remain active beyond the former shared one-hour wall
-limit. Each dependency-install command therefore has the separate three-hour
-bound documented below without changing dependency or model pins.
+Production Install-from-GitHub evidence also showed that multi-gigabyte Python
+dependency downloads can remain active for many hours on a healthy connection.
+Dependency-install commands therefore have no total elapsed-time timeout; they
+remain foreground operations and retain bounded private output capture without
+changing dependency or model pins.
 
 That evidence applies only to the tested Linux runtime configuration. It is not
 a perceptual or transcription-quality evaluation, and it does not establish
@@ -277,11 +278,16 @@ the privacy-safe fallback. Correct the reported condition and run **Repair**;
 the extension intentionally omits commands, indexes, URLs, local paths,
 credentials, and raw resolver output from public logs.
 
-Each multi-gigabyte dependency-install command has a separate three-hour wall
-limit; environment preparation, dependency checks, metadata audits, and runtime
-health probes retain their shorter bounded limits. `SETUP_COMMAND_TIMEOUT`
-means one of those bounds expired. Verify network and system responsiveness,
-then run **Repair**; setup does not continue from an unverified environment.
+Dependency-install commands have no total elapsed-time timeout and are never
+terminated merely because a package download is slow. They still fail on the
+package manager's own nonzero exit or on unsafe output behavior. Environment
+preparation, dependency checks, metadata audits, and runtime health probes keep
+their bounded limits. `SETUP_COMMAND_TIMEOUT` therefore applies only when one
+of those bounded commands expires; it is not emitted merely because a
+dependency installation runs for a long time. When the platform can deliver a
+catchable user or host interrupt (SIGINT, POSIX SIGTERM, or Windows SIGBREAK),
+setup reports `SETUP_INTERRUPTED`; run **Repair** to resume from a verified
+state. An operating-system force kill cannot emit an extension diagnostic.
 
 Runtime health failures also use a bounded, descriptor-isolated JSON channel.
 `SETUP_HEALTH_CUDA_OOM` means a CUDA allocation failed under current GPU-memory

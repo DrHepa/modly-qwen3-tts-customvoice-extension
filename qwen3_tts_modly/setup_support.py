@@ -40,9 +40,6 @@ VENV_BACKUP_NAME = "venv.__modly_backup"
 COMMAND_OUTPUT_LIMIT = 64 * 1024
 COMMAND_TIMEOUT_SECONDS = 60 * 60
 UTILITY_TIMEOUT_SECONDS = 60
-# Multi-gigabyte wheel installs need a wider wall budget than utility probes,
-# while still requiring a finite Repair boundary.
-DEPENDENCY_INSTALL_TIMEOUT_SECONDS = 3 * COMMAND_TIMEOUT_SECONDS
 COMMAND_READ_SIZE = 8192
 SAFE_COMMAND_STAGES = frozenset(
     {
@@ -256,11 +253,11 @@ def _bounded_command(
     command: list[str],
     *,
     output_limit: int = COMMAND_OUTPUT_LIMIT,
-    timeout: int = COMMAND_TIMEOUT_SECONDS,
+    timeout: float | None = COMMAND_TIMEOUT_SECONDS,
 ) -> CommandOutcome:
-    """Capture a child process privately without allowing unbounded output."""
+    """Capture a child privately with bounded output and an optional wall limit."""
 
-    if output_limit < 1 or timeout < 1:
+    if output_limit < 1 or (timeout is not None and timeout <= 0):
         raise ValueError("command limits must be positive")
     process = subprocess.Popen(
         command,
@@ -305,6 +302,14 @@ def _bounded_command(
             returncode = process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             returncode = -1
+    except KeyboardInterrupt:
+        _kill_process(process)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        reader.join(timeout=1)
+        raise
 
     reader.join(timeout=10)
     if reader.is_alive():
@@ -401,9 +406,9 @@ def run_checked(
     stage: str,
     log: LogFunction,
     *,
-    timeout: int = COMMAND_TIMEOUT_SECONDS,
+    timeout: float | None = COMMAND_TIMEOUT_SECONDS,
 ) -> None:
-    """Run with bounded private output and emit only classified public diagnostics."""
+    """Run with bounded private output and an optional total wall-clock limit."""
 
     safe_stage = _safe_stage(stage)
     log(safe_stage)
@@ -1092,7 +1097,7 @@ def install_dependencies(
             command,
             stage,
             log,
-            timeout=DEPENDENCY_INSTALL_TIMEOUT_SECONDS,
+            timeout=None,
         )
     verify_pip_check(python, flavor, log)
 

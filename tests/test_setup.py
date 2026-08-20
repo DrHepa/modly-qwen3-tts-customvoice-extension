@@ -710,14 +710,14 @@ def test_run_checked_timeout_uses_stable_actionable_private_diagnostic(
         assert forbidden not in exposed
 
 
-def test_dependency_installs_use_distinct_long_wall_timeout(
+def test_dependency_installs_have_no_total_wall_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "constraints.txt").write_text("pins", encoding="utf-8")
     (tmp_path / "requirements.txt").write_text("pins", encoding="utf-8")
     flavor = setup_support.PlatformFlavor("linux", "x64", "cuda", "cu130", "13.0")
-    calls: list[tuple[str, int]] = []
+    calls: list[tuple[str, float | None]] = []
 
     monkeypatch.setattr(setup_support, "installed_versions", lambda *_args: {})
     monkeypatch.setattr(
@@ -738,14 +738,32 @@ def test_dependency_installs_use_distinct_long_wall_timeout(
         "Installing the pinned Python SoX wrapper",
         "Installing the pinned Qwen3-TTS runtime",
     ]
-    assert {timeout for _stage, timeout in calls} == {
-        setup_support.DEPENDENCY_INSTALL_TIMEOUT_SECONDS
-    }
-    assert (
-        setup_support.DEPENDENCY_INSTALL_TIMEOUT_SECONDS
-        == 3 * setup_support.COMMAND_TIMEOUT_SECONDS
-        == 3 * 60 * 60
+    assert {timeout for _stage, timeout in calls} == {None}
+
+
+def test_unbounded_dependency_command_cannot_emit_wall_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[float | None] = []
+
+    def fake_bounded(
+        _command: list[str], *, timeout: float | None
+    ) -> setup_support.CommandOutcome:
+        calls.append(timeout)
+        return setup_support.CommandOutcome(returncode=0, output=b"")
+
+    monkeypatch.setattr(setup_support, "_bounded_command", fake_bounded)
+    messages: list[str] = []
+    setup_support.run_checked(
+        ["private-python", "-m", "pip", "install", "private-package"],
+        "Installing pinned native wheels",
+        messages.append,
+        timeout=None,
     )
+
+    assert calls == [None]
+    assert messages == ["Installing pinned native wheels"]
+    assert "SETUP_COMMAND_TIMEOUT" not in "\n".join(messages)
 
 
 def test_bounded_command_kills_output_over_limit() -> None:
@@ -1526,6 +1544,39 @@ def test_cli_hides_unexpected_exception_details(
     captured = capsys.readouterr()
     assert "SETUP_UNEXPECTED" in captured.err
     assert sensitive not in captured.err
+
+
+def test_cli_reports_actionable_interruption_without_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        setup,
+        "run_setup",
+        lambda _context: setup._raise_setup_interrupted(15, None),
+    )
+    assert setup.cli(["setup.py", "{}"]) == 1
+    captured = capsys.readouterr()
+    assert "SETUP_INTERRUPTED" in captured.err
+    assert "run Repair again" in captured.err
+    assert "SETUP_COMMAND_TIMEOUT" not in captured.err
+
+
+def test_cli_restores_catchable_host_signal_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    restored: list[list[tuple[int, object]]] = []
+    previous = [(15, object())]
+    monkeypatch.setattr(setup, "_install_termination_handlers", lambda: previous)
+    monkeypatch.setattr(
+        setup,
+        "_restore_termination_handlers",
+        lambda handlers: restored.append(handlers),
+    )
+    monkeypatch.setattr(setup, "run_setup", lambda _context: None)
+
+    assert setup.cli(["setup.py", "{}"]) == 0
+    assert restored == [previous]
 
 
 def test_cli_preserves_asset_code_but_hides_internal_asset_detail(

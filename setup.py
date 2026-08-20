@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import signal
 import subprocess
 import sys
 from typing import Any, Sequence
@@ -51,6 +52,34 @@ class SetupFailure(RuntimeError):
 
 def log(message: str) -> None:
     print(f"[Qwen3-TTS setup] {message}", flush=True)
+
+
+def _raise_setup_interrupted(_signum: int, _frame: Any) -> None:
+    raise KeyboardInterrupt
+
+
+def _install_termination_handlers() -> list[tuple[int, Any]]:
+    """Map catchable host termination signals to the public interruption path."""
+
+    previous_handlers: list[tuple[int, Any]] = []
+    for name in ("SIGTERM", "SIGBREAK"):
+        signum = getattr(signal, name, None)
+        if not isinstance(signum, int):
+            continue
+        try:
+            previous = signal.signal(signum, _raise_setup_interrupted)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        previous_handlers.append((signum, previous))
+    return previous_handlers
+
+
+def _restore_termination_handlers(previous_handlers: list[tuple[int, Any]]) -> None:
+    for signum, previous in reversed(previous_handlers):
+        try:
+            signal.signal(signum, previous)
+        except (OSError, RuntimeError, ValueError):
+            pass
 
 
 def parse_setup_args(argv: Sequence[str]) -> dict[str, Any]:
@@ -209,6 +238,7 @@ def _public_failure(exc: BaseException) -> tuple[str, str]:
 
 def cli(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv if argv is None else argv)
+    previous_handlers = _install_termination_handlers()
     try:
         context = parse_setup_args(arguments)
         run_setup(context)
@@ -221,6 +251,8 @@ def cli(argv: Sequence[str] | None = None) -> int:
             flush=True,
         )
         return 1
+    finally:
+        _restore_termination_handlers(previous_handlers)
 
 
 if __name__ == "__main__":
