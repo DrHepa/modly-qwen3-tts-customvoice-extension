@@ -130,9 +130,10 @@ class InterpreterIdentity:
     implementation: str
     cache_tag: str
     soabi: str
+    ext_suffix: str
     prefix: str
 
-    def abi_signature(self) -> tuple[str, str, str, str, str, str]:
+    def abi_signature(self) -> tuple[str, str, str, str, str, str, str]:
         return (
             self.python_minor,
             self.system,
@@ -140,6 +141,7 @@ class InterpreterIdentity:
             self.implementation,
             self.cache_tag,
             self.soabi,
+            self.ext_suffix,
         )
 
 
@@ -432,6 +434,7 @@ def interpreter_identity(python: Path) -> InterpreterIdentity:
         "'implementation':sys.implementation.name,"
         "'cacheTag':sys.implementation.cache_tag or '',"
         "'soabi':sysconfig.get_config_var('SOABI') or '',"
+        "'extSuffix':sysconfig.get_config_var('EXT_SUFFIX') or '',"
         "'prefix':os.path.normcase(os.path.realpath(sys.prefix))},sort_keys=True))"
     )
     try:
@@ -453,6 +456,7 @@ def interpreter_identity(python: Path) -> InterpreterIdentity:
         implementation = str(payload["implementation"])
         cache_tag = str(payload["cacheTag"])
         soabi = str(payload["soabi"])
+        ext_suffix = str(payload["extSuffix"])
         raw_prefix = str(payload["prefix"])
         if not os.path.isabs(raw_prefix):
             raise ValueError("identity prefix is not absolute")
@@ -461,7 +465,7 @@ def interpreter_identity(python: Path) -> InterpreterIdentity:
         raise SetupSupportError(
             "SETUP_INTERPRETER_PROBE_FAILED", "a Python interpreter identity could not be verified"
         ) from exc
-    if not all((implementation, cache_tag, soabi)) or not os.path.isabs(prefix):
+    if not all((implementation, cache_tag)) or not any((soabi, ext_suffix)) or not os.path.isabs(prefix):
         raise SetupSupportError(
             "SETUP_INTERPRETER_PROBE_FAILED", "a Python interpreter ABI identity is incomplete"
         )
@@ -472,6 +476,7 @@ def interpreter_identity(python: Path) -> InterpreterIdentity:
         implementation,
         cache_tag,
         soabi,
+        ext_suffix,
         prefix,
     )
 

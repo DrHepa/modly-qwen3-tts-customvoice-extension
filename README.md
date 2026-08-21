@@ -6,7 +6,7 @@ input to one mono PCM16 WAV file at 24 kHz using the built-in speakers from
 
 ## Status
 
-Version `0.1.4` supports the unmodified Modly v0.4.1 Python PROCESS setup and
+Version `0.1.5` supports the unmodified Modly v0.4.1 Python PROCESS setup and
 runtime contracts, including their payloads without a model-directory field.
 It has static, unit, mocked protocol, and limited real-runtime validation. In
 one clean Linux runtime, setup completed, the immutable
@@ -97,11 +97,15 @@ Use Modly's **Install from GitHub** flow:
    verified canonically.
 2. Setup creates or repairs exactly `<extension>/venv` using Modly's Python.
    A venv is reused in place only when Python minor, implementation, cache tag,
-   SOABI, operating system, and architecture match, and the interpreter reports
-   that venv as its active prefix. Otherwise setup verifies a fixed sibling
-   staging venv, activates it with rollback-safe renames, and removes the
-   temporary backup. Normal POSIX `venv/bin/python` interpreter symlinks are
-   supported after this prefix and ABI verification.
+   SOABI, EXT_SUFFIX, operating system, and architecture match, and the
+   interpreter reports that venv as its active prefix. Python ABI identity
+   requires implementation, cache tag, and at least one of SOABI or EXT_SUFFIX;
+   both markers are preserved for the comparison. This supports Windows Python
+   builds whose `sysconfig` omits SOABI without fabricating an ABI value.
+   Otherwise setup verifies a fixed sibling staging venv, activates it with
+   rollback-safe renames, and removes the temporary backup. Normal POSIX
+   `venv/bin/python` interpreter symlinks are supported after this prefix and
+   ABI verification.
 3. It installs exact selected direct and native package versions, rejects
    unexpected source builds, runs `pip check` plus audio/tensor health checks,
    and downloads the immutable public model snapshot.

@@ -152,6 +152,7 @@ def test_interpreter_identity_probe_is_isolated_bounded_and_sanitized(
                     "implementation": "cpython",
                     "cacheTag": "cpython-312",
                     "soabi": "cpython-312-x86_64-linux-gnu",
+                    "extSuffix": ".cpython-312-x86_64-linux-gnu.so",
                     "prefix": str(tmp_path),
                 }
             ),
@@ -167,9 +168,74 @@ def test_interpreter_identity_probe_is_isolated_bounded_and_sanitized(
             "cpython",
             "cpython-312",
             "cpython-312-x86_64-linux-gnu",
+            ".cpython-312-x86_64-linux-gnu.so",
             os.path.normcase(os.path.realpath(tmp_path)),
         )
     )
+
+
+def test_current_interpreter_identity_has_a_native_abi_marker() -> None:
+    identity = setup_support.interpreter_identity(Path(sys.executable))
+    assert identity.implementation
+    assert identity.cache_tag
+    assert identity.soabi or identity.ext_suffix
+
+
+def test_interpreter_identity_accepts_extension_suffix_when_soabi_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "pythonMinor": "3.11",
+                    "system": "win32",
+                    "arch": "AMD64",
+                    "implementation": "cpython",
+                    "cacheTag": "cpython-311",
+                    "soabi": "",
+                    "extSuffix": ".cp311-win_amd64.pyd",
+                    "prefix": str(tmp_path),
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_support.subprocess, "run", fake_run)
+    identity = setup_support.interpreter_identity(Path("python.exe"))
+    assert identity.soabi == ""
+    assert identity.ext_suffix == ".cp311-win_amd64.pyd"
+
+
+def test_interpreter_identity_rejects_when_soabi_and_extension_suffix_are_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "pythonMinor": "3.11",
+                    "system": "win32",
+                    "arch": "AMD64",
+                    "implementation": "cpython",
+                    "cacheTag": "cpython-311",
+                    "soabi": "",
+                    "extSuffix": "",
+                    "prefix": str(tmp_path),
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(setup_support.subprocess, "run", fake_run)
+    with pytest.raises(setup_support.SetupSupportError, match="SETUP_INTERPRETER_PROBE_FAILED"):
+        setup_support.interpreter_identity(Path("python.exe"))
 
 
 def _write_fake_python(venv: Path, system: str, marker: str) -> Path:
@@ -185,6 +251,10 @@ def _fake_venv_tools(
     requested_minor: str,
     system: str,
     arch: str = "x64",
+    implementation: str = "cpython",
+    cache_tag: str | None = None,
+    soabi: str | None = None,
+    ext_suffix: str | None = None,
 ) -> list[Path]:
     built: list[Path] = []
 
@@ -195,6 +265,11 @@ def _fake_venv_tools(
         implementation = parts[3] if len(parts) > 3 else "cpython"
         cache_tag = parts[4] if len(parts) > 4 else f"cpython-{minor.replace('.', '')}"
         soabi = parts[5] if len(parts) > 5 else f"cp{minor.replace('.', '')}-{marker_system}-{marker_arch}"
+        ext_suffix = (
+            parts[6]
+            if len(parts) > 6
+            else f".{soabi}.so"
+        )
         if python.parent.name.casefold() in {"bin", "scripts"}:
             prefix_path = python.parent.parent
         else:
@@ -207,16 +282,28 @@ def _fake_venv_tools(
             implementation,
             cache_tag,
             soabi,
+            ext_suffix,
             prefix,
         )
 
     def run(command: list[str], _stage: str, _log: object) -> None:
         destination = Path(command[-1])
         built.append(destination)
+        marker = f"{requested_minor}|{system}|{arch}"
+        if any(value is not None for value in (cache_tag, soabi, ext_suffix)) or implementation != "cpython":
+            marker = "|".join(
+                (
+                    marker,
+                    implementation,
+                    cache_tag or f"cpython-{requested_minor.replace('.', '')}",
+                    soabi or "",
+                    ext_suffix or "",
+                )
+            )
         _write_fake_python(
             destination,
             system,
-            f"{requested_minor}|{system}|{arch}",
+            marker,
         )
 
     monkeypatch.setattr(setup_support, "interpreter_identity", identity)
@@ -300,6 +387,41 @@ def test_implementation_cache_tag_or_soabi_mismatch_forces_staged_swap(
     )
 
 
+def test_extension_suffix_mismatch_forces_staged_swap_when_soabi_is_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    extension = tmp_path / "extension"
+    extension.mkdir()
+    bootstrap = tmp_path / "bootstrap-python"
+    bootstrap.write_text(
+        "3.11|win32|x64|cpython|cpython-311||.cp311-win_amd64.pyd",
+        encoding="utf-8",
+    )
+    _write_fake_python(
+        extension / "venv",
+        "win32",
+        "3.11|win32|x64|cpython|cpython-311||.cp311-win_arm64.pyd",
+    )
+    built = _fake_venv_tools(
+        monkeypatch,
+        requested_minor="3.11",
+        system="win32",
+        soabi="",
+        ext_suffix=".cp311-win_amd64.pyd",
+    )
+
+    result = setup_support.create_or_reuse_venv(
+        bootstrap, extension, "win32", lambda _message: None
+    )
+
+    assert result == extension / "venv" / "Scripts" / "python.exe"
+    assert built == [extension / setup_support.VENV_STAGING_NAME]
+    assert result.read_text(encoding="utf-8") == (
+        "3.11|win32|x64|cpython|cpython-311||.cp311-win_amd64.pyd"
+    )
+
+
 def test_venv_interpreter_rejects_non_venv_prefix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -316,6 +438,7 @@ def test_venv_interpreter_rejects_non_venv_prefix(
             "cpython",
             "cpython-312",
             "cp312-linux-x64",
+            ".cp312-linux-x64.so",
             os.path.normcase(os.path.realpath(tmp_path / "outside-prefix")),
         ),
     )
@@ -353,6 +476,7 @@ def test_mocked_windows_venv_validates_scripts_python_and_prefix(
         "cpython",
         "cpython-312",
         "cp312-win_amd64",
+        ".cp312-win_amd64.pyd",
         os.path.normcase(os.path.realpath(venv)),
     )
     monkeypatch.setattr(setup_support, "interpreter_identity", lambda _python: expected)
@@ -1287,6 +1411,7 @@ def test_venv_verification_accepts_python_311_and_312(
         "cpython",
         f"cpython-{version[0]}{version[1]}",
         f"cp{version[0]}{version[1]}-linux-x64",
+        f".cp{version[0]}{version[1]}-linux-x64.so",
         os.path.normcase(os.path.realpath(extension / "venv")),
     )
     monkeypatch.setattr(setup, "validate_venv_interpreter", lambda *_args: identity)
